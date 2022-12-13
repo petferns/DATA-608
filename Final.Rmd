@@ -1,0 +1,317 @@
+---
+title: "DATA 608 - Final Project: Beer data analysis"
+author: "Peter Fernandes"
+
+output: 
+  html_document:
+    #theme: cerulean
+    #highlight: pygments
+    #css: ./lab.css
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Introduction
+
+For this project of DATA 608 I will be using the kaggle dataset <a href="https://www.kaggle.com/code/aieducation/how-delicious-is-this-beer-eda-lightgbm/data">beer_reviews.csv</a>. The dataset has 1.5 million beer reviews , with ratings for appearance, aroma, palate, taste, and overall impression.
+
+# Objective
+
+What are the factors that makes a beer favorite among the beer drinkers? How does the features like - beer taste, aroma, appearance, palate, review-time, beer style affects it's overall rating.
+
+```{r warning=F, error=F, echo=F}
+library(shiny)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tibble)
+library(DataExplorer)
+library(kableExtra)
+library(tidymodels)
+library(MASS)
+library(sqldf)
+library(ggplot2)
+library(rsconnect)
+```
+
+
+# Dataset
+
+## Columns description:
+
+- `brewery_name`: The name of the brewery that made the beer. (String)
+- `review_time`: The date and time of the review. (String)
+- `review_overall`: The reviewer's overall rating of the beer on a scale of 1 to 5. (Float)
+- `review_aroma`: The reviewer's rating of the beer's aroma on a scale of 1 to 5. (Float)
+- `review_appearance`: The reviewer's rating of the beer's appearance on a scale of 1 to 5. (Float)
+- `review_profilename`: The reviewer's username. (String)
+- `beer_style`: The style of beer. (String)
+- `review_palate`: The reviewer's rating of the beer's palate on a scale of 1 to 5. (Float)
+- `review_taste`: The reviewer's rating of the beer's taste on a scale of 1 to 5. (Float)
+- `beer_name`: The name of the beer. (String)
+- `beer_abv`: The alcohol by volume of the beer. (Float)
+
+## Loading of the dataset
+
+I have downloaded the dataset from kaggale and placed in my local projects folder.
+
+```{r}
+df_beers <- read.csv('D:\\MSProjects\\608\\beer_reviews.csv',  stringsAsFactors=T)
+```
+
+The whole dataset consists of 1586614 observations and 14 variables.
+
+```{r}
+dim(df_beers)
+```
+
+
+```{r}
+summary(df_beers)
+```
+
+## Cleaning of the data
+
+We see from the summary of the dataset `beer_abv` has 67785 NA values. Since the dataset if large we will just drop all the NA records from our further analysis.
+
+The new cleaned dataset has 1518829 observations.
+
+```{r}
+df_cleaned <- na.omit(df_beers)
+dim(df_cleaned)
+```
+
+Next, we also exclude the column `index` its just a sequential number which is of no use for our analysis.
+
+
+```{r}
+df_cleaned <- df_cleaned[,-1]
+```
+
+Column `beer_style` has 2 values so this column will be split into 2 as `beer_style1` and `beer_style2` and `beer_style` column will be dropped from the dataset.
+
+```{r}
+df_cleaned <- df_cleaned %>% separate(beer_style, c("beer_style1","beer_style2"), extra="drop",fill = "right" )
+```
+
+```{r}
+unique(as.factor(df_cleaned$beer_style1))
+```
+
+
+```{r}
+head(df_cleaned,10) %>% kable() %>% kable_styling()
+```
+## Splitting of the dataset
+
+
+I will split the dataset into 70% training and 30% testing dataset as `df_train` and `df_test` respectively.
+
+```{r}
+set.seed(3)
+df_split <- initial_split(df_cleaned, prop = 0.7)
+df_train <- training(df_split)
+df_test <- testing(df_split)
+
+```
+
+Our training dataset has 1063180 observations.
+
+```{r}
+summary(df_train)
+dim(df_train)
+```
+# Data visualization
+
+In the below scatter plots of `brewery_id` versus `review_overall` and `beer_abv` versus `review_overall`, we do not see any relationship.
+
+```{r}
+plot(df_train$brewery_id, df_train$review_overall, main="Brewery/ Ratings",
+   xlab="Brewery ", ylab="Rating ", pch=19)
+```
+
+
+```{r}
+plot(df_train$beer_abv, df_train$review_overall, main="Beer abv/ Ratings",
+   xlab="Beer abv ", ylab="Rating ", pch=19)
+```
+
+Next, I plotted the correlation matrix for all the features and we see a positive coorelation among the partial review factors.
+
+
+```{r, fig.height = 10, fig.width = 10, echo=FALSE, warning=FALSE}
+DataExplorer::plot_correlation(data = df_train,type = "all",cor_args = list("use" = "pairwise.complete.obs"))
+```
+
+# Model building
+
+I build a linear regression model by choosing the significant factors and we see the model performs well with high Fstat, smaller residual error and significant p-value.
+Residual histogram is almost normally distributed, qq plot has most of the point falling under the line with some skewing at both edges
+
+```{r echo=FALSE}
+residualPlots <- function(model) {
+  # Make sure a model was passed
+  if (is.null(model)) {
+    return
+  }
+  
+  layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE))
+  plot(residuals(model))
+  hist(model[["residuals"]], freq = FALSE, breaks = "fd", main = "Residual Histogram",
+       xlab = "Residuals",col="lightgreen")
+  lines(density(model[["residuals"]], kernel = "ep"),col="blue", lwd=3)
+  curve(dnorm(x,mean=mean(model[["residuals"]]), sd=sd(model[["residuals"]])), col="red", lwd=3, lty="dotted", add=T)
+  qqnorm(model[["residuals"]], main = "Residual Q-Q plot")
+  qqline(model[["residuals"]],col="red", lwd=3, lty="dotted")
+  par(mfrow = c(1, 1))
+}
+```
+
+```{r}
+df_train <- dplyr::select_if(df_train,is.numeric)
+
+model1 <- lm(review_overall ~ ., df_train)
+
+
+(model1_summary <- summary(model1))
+
+residualPlots(model1_summary)
+```
+
+
+
+
+# Conclusion
+
+Review time, aroma, appearance, palate and taste form the major factors for the overall rating of a beer.
+
+
+
+# Shiny app
+
+**App1 - Beer aroma / Overall rating by brewery name** 
+
+
+```{r}
+Q1<-sqldf("
+select 
+review_overall, review_time, review_aroma ,brewery_name
+from 
+(
+select 
+            review_overall, review_time, review_aroma ,brewery_name
+            from df_beers where brewery_name <>''
+          
+            group by brewery_name
+) group by 4")
+```
+
+
+
+
+```{r}
+ui <- fluidPage(
+  sidebarPanel(
+    selectInput(inputId = "Brewery", label = "Brewery name:",
+                choices = levels(as.factor(unique(Q1$brewery_name)))
+    ),
+    helpText("Beer aroma / Overall rating by brewery name"),
+    width = "auto"
+  ),
+  plotOutput("plot1")
+)
+server<- function(input, output) {
+  
+  output$plot1 <-renderPlot({
+    
+    SelectedCause <- input$Brewery
+    
+    ggplot(data=Q1[Q1$brewery_name == SelectedCause,]
+           , aes(x = review_aroma, y = review_overall)) +
+      labs(x="review_aroma", y="review_overall", 
+           title = "review_aroma/review_overall",
+           #subtitle = paste("Caused by", SelectedCause)
+           )+   
+      geom_bar(stat="identity", fill="steelblue") + 
+      #geom_hline(aes(yintercept = mean(review_overall, na.rm = TRUE), linetype = "National Average"), col="red", lwd=1) +
+      scale_linetype(name = NULL) +
+      theme_bw()
+    
+  })
+}
+shinyApp(ui = ui, server = server)
+
+```
+
+
+**APP2 :  Review appearance / Overall rating by brewery name and Beer style**
+
+```{r}
+Q2<-sqldf("
+select 
+review_overall, review_time, review_aroma ,brewery_name, beer_style,review_appearance
+from 
+(
+select 
+            review_overall, review_time, review_aroma ,brewery_name, beer_style,review_appearance
+            from df_beers where brewery_name <>''
+          
+            group by brewery_name
+) group by 4")
+```
+
+
+```{r}
+ui <- fluidPage(
+  sidebarPanel(
+    selectInput(inputId = "Brewery", label = "Brewery name:",
+                choices = levels(as.factor(unique(Q2$brewery_name)))
+    ),
+    selectInput(inputId = "BeerStyle", label = "Beer Style:",
+               choices = levels(as.factor(unique(Q2$beer_style)))
+    ),
+    helpText("Review appearance / Overall rating by brewery name and Beer style"),
+    width = "auto"
+  ),
+  plotOutput("plot2")
+)
+server<- function(input, output) {
+  
+  output$plot2 <-renderPlot({
+    
+    SelectedCause <- input$Brewery
+    SelectedState <- input$BeerStyle
+    
+    ggplot(data = Q2[Q2$brewery_name == SelectedCause & Q2$beer_style == SelectedState,]) +
+      geom_bar(aes(x = review_appearance, weight = review_overall), fill = "steelblue") +
+      labs(x="Review appearance", y = "Review overall", 
+           title = "Review appearance / Overall rating by brewery name and Beer style"
+          # ,subtitle = paste("Caused by", SelectedCause, "in", SelectedState)
+           ) +
+      #geom_line(aes(x = Year, y = N.Crude.Rate, linetype = "National Average"), col = "red", lwd = 1) +
+      scale_linetype(name = NULL) +
+      theme_bw()
+    
+     
+    ggplot(data=Q1[Q1$brewery_name == SelectedCause,]
+           , aes(x = review_aroma, y = review_overall)) +
+      labs(x="review_aroma", y="review_overall", 
+           title = "review_aroma/review_overall",
+           #subtitle = paste("Caused by", SelectedCause)
+           )+   
+      geom_bar(stat="identity", fill="steelblue") + 
+      #geom_hline(aes(yintercept = mean(review_overall, na.rm = TRUE), linetype = "National Average"), col="red", lwd=1) +
+      scale_linetype(name = NULL) +
+      theme_bw()
+    
+  })
+}
+shinyApp(ui = ui, server = server)
+```
+
+
